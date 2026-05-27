@@ -1,12 +1,12 @@
 # sim_teleop
 
-Remote teleoperation of robotic arms in simulation, powered by the [Genesis](https://github.com/Genesis-Embodied-AI/Genesis) physics engine.
+Remote teleoperation of robotic arms in simulation.
 
 ## Goals
 
 1. **Sim teleop for real robot arms** -- build a simulation environment where you can remotely teleoperate the same arms we use on the bench (SO100, Aloha, Koch), without needing the physical hardware connected.
 
-2. **Try the Genesis engine** -- Genesis is a Python-first physics simulator that runs 10-80x faster than Isaac Sim and MuJoCo. We want to evaluate it as our primary sim backend for policy training and teleop data collection.
+2. **Evaluate the Genesis engine** -- [Genesis](https://github.com/Genesis-Embodied-AI/Genesis) is a Python-first physics simulator that runs 10-80x faster than Isaac Sim and MuJoCo. We want to try it out and see how it compares to other sim backends (MuJoCo, Gymnasium, etc.).
 
 3. **Sim-to-real pipeline** -- collect teleop demonstrations in sim, train policies, and transfer to real hardware via the existing LeRobot / GR00T infrastructure in BluPe.
 
@@ -22,16 +22,16 @@ Remote teleoperation of robotic arms in simulation, powered by the [Genesis](htt
 
 ```
 ┌─────────────┐      ┌──────────────────┐      ┌─────────────┐
-│  Teleop      │      │  Genesis Scene   │      │  Data        │
-│  Interface   │─────▶│  (physics sim)   │─────▶│  Recording   │
-│  (gamepad,   │      │                  │      │  (LeRobot    │
-│   keyboard,  │      │  Robot + Objects  │      │   format)    │
-│   phone)     │      │  + Cameras       │      │              │
+│  Teleop      │      │  Sim Engine      │      │  Data        │
+│  Interface   │─────▶│  (Genesis,       │─────▶│  Recording   │
+│  (gamepad,   │      │   MuJoCo, etc.)  │      │  (LeRobot    │
+│   keyboard,  │      │                  │      │   format)    │
+│   phone)     │      │  Robot + Objects  │      │              │
 └─────────────┘      └──────────────────┘      └─────────────┘
 ```
 
 - **Teleop Interface**: gamepad, keyboard, or phone input mapped to joint targets
-- **Genesis Scene**: physics simulation with robot arm, table, objects, and cameras
+- **Sim Engine**: physics simulation with robot arm, table, objects, and cameras (Genesis, MuJoCo, or others)
 - **Data Recording**: save episodes in LeRobot-compatible format for downstream training
 
 ## Getting Started
@@ -41,8 +41,7 @@ Remote teleoperation of robotic arms in simulation, powered by the [Genesis](htt
 git clone https://github.com/andlyu/sim_teleop.git
 cd sim_teleop
 
-# Install dependencies
-pip install genesis-world
+# Install
 pip install -e .
 ```
 
@@ -50,8 +49,8 @@ pip install -e .
 
 ## Roadmap
 
-- [ ] Project scaffolding and Genesis "hello world"
-- [ ] Load SO100 URDF into Genesis scene
+- [ ] Project scaffolding and sim engine "hello world" (Genesis + MuJoCo)
+- [ ] Load SO100 URDF into sim
 - [ ] Keyboard teleop in sim
 - [ ] Camera rendering and observation recording
 - [ ] LeRobot-format episode export
