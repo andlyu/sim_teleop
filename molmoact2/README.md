@@ -13,8 +13,8 @@ model, a stub, or a human — they all implement the same `Policy`.
 
 ```
   MAC (free)                         VAST GPU (paid, ~$0.30/hr)
-  sim ── Observation ──> MolmoActClient ──HTTP──> host_server_so100.py
-      <── action chunk ──            <──────────  MolmoAct2-SO100_101 (5B)
+  sim ── Observation ──> MolmoActClient ──HTTP──> host_server_so101.py
+      <── action chunk ──            <──────────  MolmoAct2-SO100_101 (5B, SO101)
 ```
 
 ## Layout
@@ -35,7 +35,7 @@ model, a stub, or a human — they all implement the same `Policy`.
 - [x] Code authored; importable on the Mac with no GPU deps.
 - [x] Adapter + stub verified by `smoke_test.py` (free).
 - [ ] **Live model not yet run** — needs a Vast GPU (paid; your credentials).
-- [ ] **Units NOT calibrated.** `adapter.SO100_DEG` assumes arm joints are in
+- [ ] **Units NOT calibrated.** `adapter.SO101_DEG` assumes arm joints are in
       degrees and the gripper passes through unchanged — inferred from the model
       card sample, not verified end to end. This is the #1 silent-failure risk;
       validate against the live checkpoint before trusting any rollout.

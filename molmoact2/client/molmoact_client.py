@@ -7,7 +7,7 @@ difference. All it does is:
   2. POST {images, state, instruction} to the Vast GPU server,
   3. adapt the returned action chunk (model scale) -> sim (rad).
 
-The server (molmoact2/server/host_server_so100.py) owns the actual model. This
+The server (molmoact2/server/host_server_so101.py) owns the actual model. This
 keeps every heavy dependency (torch+cuda, transformers, the 5B checkpoint) off
 the Mac. The only deps here are numpy + requests.
 
