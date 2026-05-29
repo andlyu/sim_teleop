@@ -1,7 +1,8 @@
-"""Phase C: keyboard teleoperation of the SO101 arm in Genesis.
+"""Keyboard teleoperation of the SO101 arm in Genesis.
 
 A ViewerPlugin captures keystrokes and nudges per-joint position targets, which a
-PD controller tracks each sim step. This is the first real "teleop" milestone.
+PD controller tracks each sim step. The scene (table + graspable cube) comes from
+so101_scene, so you can drive the arm to pick up the cube.
 
 Controls (focus the viewer window):
     1-6      select a joint (shoulder_pan, shoulder_lift, elbow_flex,
@@ -15,28 +16,14 @@ Run:
     .venv/bin/python scripts/teleop_so101.py
 """
 
-import xml.etree.ElementTree as ET
-from pathlib import Path
-
 import numpy as np
 import genesis as gs
 from genesis.vis.keybindings import Key
 from genesis.vis.viewer_plugins import ViewerPlugin
 
-REPO = Path(__file__).resolve().parent.parent
-URDF = REPO / "assets" / "so101" / "so101_new_calib.urdf"
+import so101_scene as S
 
-JOINT_NAMES = [
-    "shoulder_pan",
-    "shoulder_lift",
-    "elbow_flex",
-    "wrist_flex",
-    "wrist_roll",
-    "gripper",
-]
-
-KP = np.array([30.0, 30.0, 30.0, 20.0, 15.0, 10.0])
-KV = np.array([2.0, 2.0, 2.0, 1.5, 1.0, 0.8])
+JOINT_NAMES = S.JOINT_NAMES
 
 # Radians moved per sim step while a +/- key is held.
 STEP = 0.01
@@ -51,17 +38,6 @@ SELECT_KEYS = {
 }
 INC_KEYS = {int(Key.EQUAL), int(Key.UP)}
 DEC_KEYS = {int(Key.MINUS), int(Key.DOWN)}
-
-
-def joint_limits(urdf_path: Path) -> dict[str, tuple[float, float]]:
-    """Read (lower, upper) limits per joint name from the URDF."""
-    root = ET.parse(urdf_path).getroot()
-    limits = {}
-    for j in root.findall("joint"):
-        lim = j.find("limit")
-        if lim is not None and lim.get("lower") is not None:
-            limits[j.get("name")] = (float(lim.get("lower")), float(lim.get("upper")))
-    return limits
 
 
 class KeyboardTeleop(ViewerPlugin):
@@ -111,23 +87,11 @@ class KeyboardTeleop(ViewerPlugin):
 def main() -> None:
     gs.init(backend=gs.cpu)
 
-    scene = gs.Scene(
-        viewer_options=gs.options.ViewerOptions(
-            camera_pos=(0.6, 0.6, 0.4),
-            camera_lookat=(0.0, 0.0, 0.1),
-            camera_fov=40,
-        ),
-        show_viewer=True,
-    )
-    scene.add_entity(gs.morphs.Plane())
-    robot = scene.add_entity(gs.morphs.URDF(file=str(URDF), fixed=True))
+    scene, robot, _cube = S.build_scene(show_viewer=True)
     scene.build()
+    dofs_idx = S.setup_control(robot)
 
-    dofs_idx = [robot.get_joint(n).dofs_idx_local[0] for n in JOINT_NAMES]
-    robot.set_dofs_kp(KP, dofs_idx)
-    robot.set_dofs_kv(KV, dofs_idx)
-
-    limits = joint_limits(URDF)
+    limits = S.joint_limits()
     lowers = np.array([limits[n][0] for n in JOINT_NAMES])
     uppers = np.array([limits[n][1] for n in JOINT_NAMES])
 
