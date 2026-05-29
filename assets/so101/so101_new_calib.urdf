@@ -289,6 +289,25 @@
     </collision>
   </link>
 
+  <!-- Wrist camera mount FRAME (cross-validated from MSSergeev/so101-lab +
+       tuul-ai/so101_sim, both on the identical so101_new_calib model). This is a
+       pure pose frame for attaching the Genesis render camera — NO visual mesh,
+       because a solid camera_box body would occlude the render camera placed at
+       this link (the camera would look through its own housing). -->
+  <link name="camera_wrist">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="1e-6"/>
+      <inertia ixx="1e-9" ixy="0.0" ixz="0.0" iyy="1e-9" iyz="0.0" izz="1e-9"/>
+    </inertial>
+  </link>
+
+  <joint name="wrist_to_camera_wrist" type="fixed">
+    <parent link="gripper_link"/>
+    <child link="camera_wrist"/>
+    <origin xyz="0.002265 -0.074668 0.009659" rpy="0.437925 0 0"/>
+  </joint>
+
   <!-- Gripper frame (dummy link + fixed joint) -->
   <link name="gripper_frame_link">
     <origin xyz="0 0 0" rpy="0 -0 0"/>
