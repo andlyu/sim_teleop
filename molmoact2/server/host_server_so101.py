@@ -60,7 +60,7 @@ def build_app(processor, model, dtype, num_steps: int):
     from fastapi import FastAPI
     from pydantic import BaseModel
 
-    app = FastAPI(title="MolmoAct2-SO100 server")
+    app = FastAPI(title="MolmoAct2-SO101 server")
 
     class PredictRequest(BaseModel):
         images: list[dict]
