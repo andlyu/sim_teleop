@@ -12,6 +12,12 @@ dependencies = [
     "torch==2.12.0",
 ]
 
+[project.optional-dependencies]
+# Mac-side MolmoAct2 client (talks to the remote GPU server). The server's own
+# deps (torch+cuda, transformers, fastapi) live in molmoact2/server/requirements.txt
+# and are installed on the Vast box, not here.
+client = ["requests"]
+
 [tool.uv]
 # No package to build yet — this project is just an environment + scripts for now.
 package = false

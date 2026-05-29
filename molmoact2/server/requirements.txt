@@ -1,0 +1,19 @@
+# GPU-side deps for the MolmoAct2-SO100_101 host server.
+# Install on the Vast box (CUDA 12.1 base image). NOT for the Mac.
+#
+# torch is intentionally unpinned here — install the CUDA build that matches the
+# box's driver first (the provided Vast PyTorch image usually ships it), e.g.:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+#
+# transformers must be recent enough for AutoModelForImageTextToText +
+# trust_remote_code with the MolmoAct2 custom modeling code.
+transformers>=4.52
+accelerate
+einops
+torchvision
+pillow
+numpy
+huggingface_hub
+fastapi
+uvicorn[standard]
+pydantic>=2

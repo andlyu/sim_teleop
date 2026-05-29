@@ -1,11 +1,11 @@
 # sim_teleop — Plan
 
-High-level roadmap for the SO100-in-Genesis teleop + policy sandbox.
+High-level roadmap for the SO101-in-Genesis teleop + policy sandbox.
 This is the canonical reference; details get filled in per subtask.
 
 ## North star
 
-An **SO100 arm in a realistic Genesis simulation**, controllable by the
+An **SO101 arm in a realistic Genesis simulation**, controllable by the
 **MolmoAct2** policy, that a human can **reset / intervene on** by hand.
 
 The deeper purpose: a sandbox to run (and eventually improve) a real VLA
@@ -17,10 +17,11 @@ evaluate, and iterate in sim, with a path toward sim-to-real.
 - **Sim engine:** Genesis (`genesis-world==1.0.0`, `torch==2.12.0`), verified
   running on Apple Silicon (CPU/Metal). Core loop: `init -> add_entity ->
   build -> step`. Robot loads natively via `gs.morphs.URDF`.
-- **Robot:** SO100 (SO-ARM100), 6 revolute joints + gripper. URDF + meshes
-  vendored under `assets/so100/`. Joint order:
+- **Robot:** SO101 (SO-ARM100 family), 6 revolute joints + gripper. URDF +
+  meshes vendored under `assets/so101/`. Joint order:
   `shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper`.
-- **Policy:** `allenai/MolmoAct2-SO100_101` — a 5B VLA, purpose-built for SO100.
+- **Policy:** `allenai/MolmoAct2-SO100_101` — a 5B VLA covering the SO100/SO101
+  family (norm_tag `so100_so101_molmoact2`), so SO101 is fully supported.
   - **Inputs per step:** 2 RGB images (top + side; order-agnostic),
     6-D proprioceptive state **in raw robot scale** (degrees, NOT radians),
     a natural-language instruction.
@@ -42,7 +43,7 @@ Subtasks **1, 2, and 3 can be developed in parallel** (each against stubs);
 they converge for integration. Subtask **4 integrates** and comes after.
 
 ### 1. Creating the setup
-The Genesis environment: SO100 + table + a task object, loaded and
+The Genesis environment: SO101 + table + a task object, loaded and
 controllable (`control_dofs_position`). A gym-style `reset()` / `step(action)`
 / `get_observation()` interface. Headless is fine to start — proving the
 physics/control core, not looks. (Realism pass — lighting, ray tracing,
@@ -77,11 +78,17 @@ as subtask 1. Closes the loop: policy acts -> human resets -> policy acts again.
 - **Phase C — Polish:** realism (lighting/ray tracing), then the "cool demo"
   (rope / water manipulation via Genesis's deformable + fluid solvers).
 
+## Resolved decisions
+
+- **SO100 vs SO101 → SO101 is canonical** (2026-05-29). The MolmoAct2-SO100_101
+  checkpoint covers both arms, and the SO101 model (URDF + 13 meshes) is already
+  vendored and verified loading/teleoping in Genesis. The stale `assets/so100/`
+  (meshless URDF) is superseded by `assets/so101/`.
+- **Realism is Phase C (last).** Build the observation→action core loop first;
+  table/lighting/ray-tracing polish layers on once the loop works.
+
 ## Open questions
 
-- **SO100 vs SO101:** the plan/assets target SO100, but there is existing
-  SO101 scaffolding in the repo (scripts + early commits). Reconcile which
-  arm is canonical before building further.
 - Manipulation target for the first working version: rigid object (recommended
   through Phase A) vs. rope/water (Phase C).
 - Sim-only demo vs. stepping stone to the real SO100 (raises the visual-realism
