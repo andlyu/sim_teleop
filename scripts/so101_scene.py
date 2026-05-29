@@ -25,15 +25,43 @@ JOINT_NAMES = [
 KP = np.array([30.0, 30.0, 30.0, 20.0, 15.0, 10.0])
 KV = np.array([2.0, 2.0, 2.0, 1.5, 1.0, 0.8])
 
-# Table: a low fixed slab the arm sits on, with a graspable cube on top.
-TABLE_SIZE = (0.5, 0.5, 0.1)   # meters (x, y, z)
-TABLE_TOP_Z = TABLE_SIZE[2]    # top surface height (table rests on the ground plane)
+# Table: a real desk (top slab + 4 legs) the arm is mounted on top of.
+# Standard office desk, rotated 90deg: 60 cm deep (x) x 120 cm wide (y), 74 cm
+# tall. The arm is mounted at the back (-x) edge and reaches forward across the
+# desk, like a real SO101 clamped to a table edge.
+TABLE_TOP_SIZE = (0.6, 1.2, 0.04)   # meters (x depth, y width, slab thickness)
+TABLE_HEIGHT = 0.74                 # top surface height above the ground
+# Arm base sits at world x=0; center the desk so its back (-x) edge is there.
+TABLE_CENTER_XY = (0.6 / 2.0, 0.0)  # (depth/2, 0) -> back edge at x=0
+LEG_SIZE = 0.05                     # square leg cross-section (m)
+LEG_INSET = 0.06                    # legs inset from the top's edges (m)
+
+# Privacy partition: a 3-sided booth (left + right + front) standing on the desk
+# around the workspace in front of the robot, open toward the robot (-x), like a
+# testing divider / photo backdrop. Gives the cameras a clean, consistent
+# background. The left/right side panels run the full desk depth (back to front).
+BACKDROP_ENABLED = True
+BACKDROP_HEIGHT = 0.40              # how tall the panels stand above the desk (m)
+BACKDROP_THICKNESS = 0.01          # panel thickness (m)
+BACKDROP_INSET = 0.02              # inset from the desk edges (m)
+BACKDROP_LEN_FRAC = 1.0            # fraction of the desk depth (x) the side panels span
+
+# Single source of truth for the work surface height. The arm base sits here,
+# the cube rests here, and (eventually) base-relative cameras anchor to it.
+TABLE_TOP_Z = TABLE_HEIGHT
+# Backwards-compat alias for callers that referenced the old TABLE_SIZE.
+TABLE_SIZE = TABLE_TOP_SIZE
 
 # A small, light, high-friction cube — sized for the SO101's little gripper.
 CUBE_SIZE = 0.03
 CUBE_RHO = 400.0       # light (balsa-ish) so the small servos can hold it
 CUBE_FRICTION = 1.5    # grippy, for graspability
 CUBE_XY = (0.18, 0.0)  # in front of the arm; z is set by the table top
+
+# Appearance (RGB 0..1). Wooden desk, contrasting red-orange block.
+WOOD_COLOR = (0.55, 0.36, 0.20)       # warm medium-brown wood
+CUBE_COLOR = (0.85, 0.20, 0.15)       # red-orange, stands out against the wood
+BACKDROP_COLOR = (0.85, 0.85, 0.85)   # neutral light gray, clean background
 
 
 def joint_limits(urdf_path: Path = URDF) -> dict:
@@ -47,6 +75,88 @@ def joint_limits(urdf_path: Path = URDF) -> dict:
     return out
 
 
+def _add_table(scene):
+    """Add a fixed desk: a top slab held up by four legs.
+
+    The top's upper surface sits at TABLE_HEIGHT; legs run from the floor up to
+    the underside of the slab. Everything is fixed (static collidable geometry).
+    """
+    cx, cy = TABLE_CENTER_XY
+    tw, td, tt = TABLE_TOP_SIZE  # top width (x), depth (y), thickness (z)
+
+    # Matte wood surface shared by the top and legs.
+    wood = gs.surfaces.Rough(color=WOOD_COLOR)
+
+    # Top slab: centered so its upper face is exactly at TABLE_HEIGHT.
+    scene.add_entity(
+        gs.morphs.Box(
+            pos=(cx, cy, TABLE_HEIGHT - tt / 2.0),
+            size=(tw, td, tt),
+            fixed=True,
+        ),
+        surface=wood,
+    )
+
+    # Four legs, inset from the slab edges, spanning floor -> underside of slab.
+    leg_h = TABLE_HEIGHT - tt
+    dx = tw / 2.0 - LEG_INSET - LEG_SIZE / 2.0
+    dy = td / 2.0 - LEG_INSET - LEG_SIZE / 2.0
+    for sx in (-1.0, 1.0):
+        for sy in (-1.0, 1.0):
+            scene.add_entity(
+                gs.morphs.Box(
+                    pos=(cx + sx * dx, cy + sy * dy, leg_h / 2.0),
+                    size=(LEG_SIZE, LEG_SIZE, leg_h),
+                    fixed=True,
+                ),
+                surface=wood,
+            )
+
+
+def _add_backdrop(scene):
+    """Add a 3-sided privacy booth (left + right + front) on the desk.
+
+    Left/right panels run front-to-back along the desk LENGTH (x), spanning half
+    of it on the front (+x) side; the front panel runs across (y) and joins them.
+    The booth is open toward the robot (-x), giving the cameras / vision policy a
+    clean, controlled background.
+    """
+    cx, cy = TABLE_CENTER_XY
+    tw, td, _tt = TABLE_TOP_SIZE
+    th, thk, ins = BACKDROP_HEIGHT, BACKDROP_THICKNESS, BACKDROP_INSET
+
+    gray = gs.surfaces.Rough(color=BACKDROP_COLOR)
+    z_center = TABLE_HEIGHT + th / 2.0   # panels stand up from the desk surface
+
+    x_far = cx + tw / 2.0 - ins                      # front (+x) desk edge, inset
+    # Side panels span a fraction of the (inset) desk depth, anchored at the front.
+    panel_len = (tw - 2.0 * ins) * BACKDROP_LEN_FRAC
+    x_center = x_far - panel_len / 2.0               # grows backward from the front edge
+    y_edge = td / 2.0 - ins - thk / 2.0              # side panels near +/- y edges
+
+    # Left (+y) and right (-y) side panels: run along x, thin along y.
+    for sy in (-1.0, 1.0):
+        scene.add_entity(
+            gs.morphs.Box(
+                pos=(x_center, cy + sy * y_edge, z_center),
+                size=(panel_len, thk, th),
+                fixed=True,
+            ),
+            surface=gray,
+        )
+
+    # Front panel: at the +x edge, runs across y to close the booth front.
+    front_w = 2.0 * y_edge + thk                     # span between the side panels
+    scene.add_entity(
+        gs.morphs.Box(
+            pos=(x_far - thk / 2.0, cy, z_center),
+            size=(thk, front_w, th),
+            fixed=True,
+        ),
+        surface=gray,
+    )
+
+
 def build_scene(show_viewer: bool = True):
     """Create the scene with ground, table, arm (mounted on the table) and cube.
 
@@ -54,27 +164,45 @@ def build_scene(show_viewer: bool = True):
     """
     scene = gs.Scene(
         viewer_options=gs.options.ViewerOptions(
-            camera_pos=(0.6, 0.6, 0.5),
-            camera_lookat=(0.0, 0.0, 0.15),
+            # Framed on the work surface, which now sits at TABLE_HEIGHT.
+            camera_pos=(0.8, 0.8, TABLE_HEIGHT + 0.45),
+            camera_lookat=(TABLE_CENTER_XY[0], TABLE_CENTER_XY[1], TABLE_HEIGHT),
             camera_fov=40,
+        ),
+        vis_options=gs.options.VisOptions(
+            # Soft, diffuse overhead lighting: strong ambient fill + a few gentle,
+            # near-vertical directional lights and no hard shadows, so the scene
+            # is evenly lit from above instead of by one sharp angled light.
+            ambient_light=(0.6, 0.6, 0.6),
+            shadow=False,
+            lights=[
+                gs.options.vis.DirectionalLight(
+                    dir=(0.0, 0.0, -1.0), color=(1.0, 1.0, 1.0), intensity=3.0),
+                gs.options.vis.DirectionalLight(
+                    dir=(-0.3, -0.2, -1.0), color=(1.0, 1.0, 1.0), intensity=1.5),
+                gs.options.vis.DirectionalLight(
+                    dir=(0.3, 0.2, -1.0), color=(1.0, 1.0, 1.0), intensity=1.5),
+            ],
         ),
         show_viewer=show_viewer,
     )
 
     scene.add_entity(gs.morphs.Plane())
 
-    # Table: fixed slab sitting on the ground, top at TABLE_TOP_Z.
-    scene.add_entity(
-        gs.morphs.Box(
-            pos=(0.1, 0.0, TABLE_SIZE[2] / 2.0),
-            size=TABLE_SIZE,
-            fixed=True,
-        ),
-    )
+    _add_table(scene)
+    if BACKDROP_ENABLED:
+        _add_backdrop(scene)
 
     # Arm: mounted on top of the table.
+    # links_to_keep preserves the camera_wrist mount frame; Genesis merges
+    # fixed-joint links by default, which would drop it.
     robot = scene.add_entity(
-        gs.morphs.URDF(file=str(URDF), pos=(0.0, 0.0, TABLE_TOP_Z), fixed=True),
+        gs.morphs.URDF(
+            file=str(URDF),
+            pos=(0.0, 0.0, TABLE_TOP_Z),
+            fixed=True,
+            links_to_keep=["camera_wrist"],
+        ),
     )
 
     # Graspable cube resting on the table top.
@@ -84,6 +212,7 @@ def build_scene(show_viewer: bool = True):
             size=(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE),
         ),
         material=gs.materials.Rigid(rho=CUBE_RHO, friction=CUBE_FRICTION),
+        surface=gs.surfaces.Rough(color=CUBE_COLOR),
     )
 
     return scene, robot, cube
