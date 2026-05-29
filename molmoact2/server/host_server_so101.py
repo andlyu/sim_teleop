@@ -19,7 +19,7 @@ The model call follows the official model card exactly:
     actions = out.actions                  # (N, D) float32, robot scale
 
 Launch (on the GPU box):
-    python host_server_so100.py --host 0.0.0.0 --port 8202 --dtype bfloat16
+    python host_server_so101.py --host 0.0.0.0 --port 8202 --dtype bfloat16
 
 VRAM: ~26GB float32, <16GB bfloat16 (per the model card). bfloat16 recommended
 for a cheap single-GPU Vast box (RTX 3090/4090).
