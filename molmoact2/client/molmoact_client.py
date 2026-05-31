@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..adapter import SO101_DEG, JointConvention, action_model_to_sim, state_sim_to_model
+from ..adapter import DEFAULT, JointConvention, action_model_to_sim, state_sim_to_model
 from .codec import decode_array, encode_array
 from .policy import Observation
 
@@ -28,7 +28,7 @@ class MolmoActClient:
     def __init__(
         self,
         url: str,
-        conv: JointConvention = SO101_DEG,
+        conv: JointConvention = DEFAULT,
         timeout_s: float = 30.0,
     ):
         # Lazy import so the rest of the package needs no `requests`.

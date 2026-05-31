@@ -31,6 +31,7 @@ import time
 
 import numpy as np
 from PIL import Image
+from pydantic import BaseModel
 
 # codec.py is copied next to this file in the server bundle (see provision_vast.sh)
 from codec import decode_array, encode_array
@@ -39,12 +40,26 @@ REPO_ID = "allenai/MolmoAct2-SO100_101"
 NORM_TAG = "so100_so101_molmoact2"
 
 
+class PredictRequest(BaseModel):
+    images: list[dict]
+    state: dict
+    instruction: str
+
+
 def load_model(dtype_str: str):
     import torch
     from transformers import AutoModelForImageTextToText, AutoProcessor
 
     dtype = {"float32": torch.float32, "bfloat16": torch.bfloat16}[dtype_str]
-    processor = AutoProcessor.from_pretrained(REPO_ID, trust_remote_code=True)
+    processor = AutoProcessor.from_pretrained(
+        REPO_ID,
+        trust_remote_code=True,
+        # The checkpoint stores extra_special_tokens as a list, while the
+        # Transformers 4.57 Qwen2 tokenizer path expects a dict. The tokens are
+        # already present in tokenizer.json; overriding this metadata avoids the
+        # startup crash without changing tokenization.
+        extra_special_tokens={},
+    )
     model = (
         AutoModelForImageTextToText.from_pretrained(
             REPO_ID, trust_remote_code=True, dtype=dtype
@@ -58,14 +73,8 @@ def load_model(dtype_str: str):
 def build_app(processor, model, dtype, num_steps: int):
     import torch
     from fastapi import FastAPI
-    from pydantic import BaseModel
 
     app = FastAPI(title="MolmoAct2-SO101 server")
-
-    class PredictRequest(BaseModel):
-        images: list[dict]
-        state: dict
-        instruction: str
 
     @app.get("/health")
     def health():
@@ -99,7 +108,10 @@ def build_app(processor, model, dtype, num_steps: int):
                 num_steps=num_steps,
                 normalize_language=True,
             )
-        actions = np.asarray(out.actions, dtype=np.float32)
+        actions_out = out.actions
+        if hasattr(actions_out, "detach"):
+            actions_out = actions_out.detach().cpu().numpy()
+        actions = np.asarray(actions_out, dtype=np.float32)
         dt_ms = (time.perf_counter() - t0) * 1000.0
         return {"actions": encode_array(actions), "dt_ms": dt_ms}
 
