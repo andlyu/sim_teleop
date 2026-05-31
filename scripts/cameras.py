@@ -37,10 +37,13 @@ DEFAULT_BASE_POS = (0.0, 0.0, 0.74)
 # Order here is the canonical order handed to the policy (order-agnostic, but
 # kept stable for reproducibility / overlays / recording). The "side" values
 # were tuned interactively via scripts/arm_cam_view.py.
+# "top" and "side" tuned via scripts/align_cams.py against the MolmoAct2
+# model-card reference images (assets/molmoact_ref/) using the overlay view.
 CAMERA_OFFSETS = {
-    "top":  dict(pos=(0.18, 0.0, 0.66), lookat=(0.18, 0.0, 0.0), fov=FOV),
-    "side": dict(pos=(0.41, -0.6, 0.42), lookat=(0.18, 0.0, 0.02),
-                 pan=-5.0, tilt=8.0, roll=2.0, fov=FOV),
+    "top":  dict(pos=(0.17, -0.305, 0.14), lookat=(0.18, 0.0, 0.02),
+                 pan=-14.0, tilt=17.0, roll=-2.0, fov=72.0),
+    "side": dict(pos=(0.8, 0.015, 0.64), lookat=(0.18, 0.0, 0.02),
+                 pan=-2.0, tilt=-7.0, roll=-2.0, fov=28.0),
 }
 
 CAMERA_NAMES = list(CAMERA_OFFSETS)  # ["top", "side"]

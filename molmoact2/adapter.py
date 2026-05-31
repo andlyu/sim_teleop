@@ -24,6 +24,7 @@ Joint order (matches the SO101 URDF and the rest of the repo):
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -80,8 +81,58 @@ IDENTITY = JointConvention(
     offset=np.zeros(NUM_JOINTS, dtype=np.float32),
 )
 
+# Convention used by the public SO-101 MolmoAct2 runner linked from the
+# official MolmoAct2 README. LeRobot's current SO101 follower reports degrees
+# (`use_degrees=True`), while the SO100/101 MolmoAct2 checkpoint was trained on
+# the older v2.1 frame. The official backward-compat transform is:
+#
+#   model_state = signs * arm_degrees + offsets
+#   arm_degrees = (model_action - offsets) * signs
+#
+# with a shoulder_lift sign flip and +90deg offsets on shoulder_lift/elbow_flex.
+LEROBOT_V21_COMPAT = JointConvention(
+    scale=np.array(
+        [_DEG_PER_RAD, -_DEG_PER_RAD, _DEG_PER_RAD, _DEG_PER_RAD, _DEG_PER_RAD, _DEG_PER_RAD],
+        dtype=np.float32,
+    ),
+    offset=np.array([0.0, 90.0, 90.0, 0.0, 0.0, 0.0], dtype=np.float32),
+)
 
-def state_sim_to_model(joint_rad: np.ndarray, conv: JointConvention = SO101_DEG) -> np.ndarray:
+# Hypothesis C (RANGE_ALIGNED): map each sim joint's full URDF range [lo,hi] (rad)
+# onto the model's typical operating range [q01,q99] (deg) from norm_stats.json.
+# Computed from assets/so101 limits + molmoact2/norm_stats.json. This accounts
+# for the LeRobot "new calib" convention (zero = middle of range) that gives the
+# large shoulder_lift/elbow_flex offsets — pure 57.3deg/rad + offset=0 would put
+# those joints far outside the range the model ever saw. Scales (~20-40) differ
+# from the physical 57.3 because sim full-range is compressed to q01..q99.
+# Built by scripts/calibrate_adapter.py; verify against the live model.
+RANGE_ALIGNED_NEW = JointConvention(
+    scale=np.array([23.492, 40.563, 39.866, 25.955, 19.049, 22.498], dtype=np.float32),
+    offset=np.array([3.192, 114.465, 105.762, 48.746, -11.178, 4.870], dtype=np.float32),
+)
+
+RANGE_ALIGNED_OLD = JointConvention(
+    scale=np.array([23.492, 40.563, 40.634, 25.955, 19.049, 22.498], dtype=np.float32),
+    offset=np.array([3.192, 178.181, 45.480, 48.746, -10.250, 4.870], dtype=np.float32),
+)
+
+
+def _calibration_name() -> str:
+    name = os.environ.get("SO101_CALIBRATION", "new").strip().lower()
+    if name not in {"new", "old"}:
+        raise ValueError(f"SO101_CALIBRATION must be 'new' or 'old', got {name!r}")
+    return name
+
+
+RANGE_ALIGNED = RANGE_ALIGNED_OLD if _calibration_name() == "old" else RANGE_ALIGNED_NEW
+
+# Default convention used by the client. For the standard/current SO101
+# calibration, match the public real-arm MolmoAct2 runner's LeRobot v3.0->v2.1
+# frame transform. Keep RANGE_ALIGNED for the old-calibration URDF experiments.
+DEFAULT = RANGE_ALIGNED_OLD if _calibration_name() == "old" else LEROBOT_V21_COMPAT
+
+
+def state_sim_to_model(joint_rad: np.ndarray, conv: JointConvention = DEFAULT) -> np.ndarray:
     """Genesis joint angles (rad) -> 6-D float32 state for MolmoAct2."""
     joint_rad = np.asarray(joint_rad, dtype=np.float32)
     if joint_rad.shape != (NUM_JOINTS,):
@@ -89,7 +140,7 @@ def state_sim_to_model(joint_rad: np.ndarray, conv: JointConvention = SO101_DEG)
     return conv.to_raw(joint_rad)
 
 
-def action_model_to_sim(action_raw: np.ndarray, conv: JointConvention = SO101_DEG) -> np.ndarray:
+def action_model_to_sim(action_raw: np.ndarray, conv: JointConvention = DEFAULT) -> np.ndarray:
     """A MolmoAct2 action (robot scale) -> Genesis joint targets (rad).
 
     MolmoAct2 returns an action chunk of shape (N, D). This converts a single

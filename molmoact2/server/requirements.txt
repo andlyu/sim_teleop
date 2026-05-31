@@ -5,14 +5,15 @@
 # box's driver first (the provided Vast PyTorch image usually ships it), e.g.:
 #   pip install torch --index-url https://download.pytorch.org/whl/cu121
 #
-# transformers must be recent enough for AutoModelForImageTextToText +
-# trust_remote_code with the MolmoAct2 custom modeling code.
-transformers>=4.52
+# MolmoAct2's remote processor currently needs the newer video helpers present
+# in 4.57.x; older 4.52.x installs fail at AutoProcessor import time.
+transformers>=4.57,<4.58
 accelerate
 einops
 torchvision
 pillow
 numpy
+protobuf
 huggingface_hub
 fastapi
 uvicorn[standard]

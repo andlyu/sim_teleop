@@ -13,10 +13,15 @@ Run:
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from molmoact2.adapter import (
+    LEROBOT_V21_COMPAT,
     NUM_JOINTS,
     SO101_DEG,
     action_model_to_sim,
@@ -28,11 +33,13 @@ from molmoact2.client import Observation, StubPolicy
 def test_adapter_roundtrip():
     rng = np.random.default_rng(0)
     rad = rng.uniform(-2.0, 2.0, size=NUM_JOINTS).astype(np.float32)
-    raw = state_sim_to_model(rad, SO101_DEG)
-    back = action_model_to_sim(raw, SO101_DEG)
-    assert np.allclose(rad, back, atol=1e-4), (rad, back)
-    # sanity: arm joints should be ~57x larger in degrees
-    assert abs(raw[0]) >= abs(rad[0]) or rad[0] == 0
+    for conv in (SO101_DEG, LEROBOT_V21_COMPAT):
+        raw = state_sim_to_model(rad, conv)
+        back = action_model_to_sim(raw, conv)
+        assert np.allclose(rad, back, atol=1e-4), (conv, rad, back)
+    # LeRobot compat sanity: shoulder_lift sign flips around a +90deg offset.
+    raw = state_sim_to_model(np.zeros(NUM_JOINTS, np.float32), LEROBOT_V21_COMPAT)
+    assert np.allclose(raw[:3], [0.0, 90.0, 90.0]), raw
     print(f"  adapter round-trip OK (max err {np.abs(rad - back).max():.2e})")
 
 

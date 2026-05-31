@@ -34,7 +34,26 @@ import cameras as C
 WRIST_RPY_DEG = (20.0, 0.0, 180.0)
 
 # A neutral "ready" pose (radians), clipped to limits at reset.
-HOME_POSE = np.array([0.0, 0.5, -0.5, 0.5, 0.0, 0.2])
+HOME_POSE_NEW = np.array([0.0, -1.745, 1.690, 0.502, -0.004, 0.196])
+HOME_POSE_OLD = np.array([0.0, -1.745, 1.690, 0.502, -0.004, 0.196])
+HOME_POSE = HOME_POSE_OLD if S.SO101_CALIBRATION == "old" else HOME_POSE_NEW
+
+
+def _patch_cpuinfo_for_genesis():
+    """Genesis CPU backend expects a CPU brand string; py-cpuinfo can omit it."""
+    try:
+        import cpuinfo
+    except Exception:
+        return
+    orig = cpuinfo.get_cpu_info
+
+    def patched():
+        info = orig()
+        if not any(info.get(k) for k in ("brand_raw", "hardware_raw", "vendor_id_raw")):
+            info["brand_raw"] = "Apple ARM CPU"
+        return info
+
+    cpuinfo.get_cpu_info = patched
 
 
 def _rpy_to_T(xyz, rpy):
@@ -55,6 +74,8 @@ class SimEnv:
 
     def __init__(self, settle_steps=150, sub_steps=20, backend=gs.cpu,
                  viewer=False, gui_cams=False):
+        if backend == gs.cpu:
+            _patch_cpuinfo_for_genesis()
         gs.init(backend=backend, logging_level="error")
         scene, robot, cube = S.build_scene(show_viewer=viewer)
 
@@ -92,12 +113,20 @@ class SimEnv:
         self.wrist.move_to_attach()
         return self.observation()
 
-    def step(self, target_rad):
-        """Set joint targets (radians), let the PD controller track, observe."""
+    def step(self, target_rad, render=True):
+        """Set joint targets (radians), let the PD controller track, observe.
+
+        render=False skips the 3-camera render and returns state only. Camera
+        rasterization is the per-step bottleneck on the CPU backend, so callers
+        that only need joint state (e.g. the policy rollout, which renders its
+        own policy views separately) should pass render=False.
+        """
         self.target = np.clip(np.asarray(target_rad, float), self.lowers, self.uppers)
         for _ in range(self.sub_steps):
             self.robot.control_dofs_position(self.target, self.dofs)
             self.scene.step()
+        if not render:
+            return {"state": self.state()}
         self.wrist.move_to_attach()
         return self.observation()
 
@@ -105,10 +134,15 @@ class SimEnv:
         """Current 6-D joint angles (radians)."""
         return np.asarray(self.robot.get_dofs_position(self.dofs)).reshape(-1)
 
-    def observation_images(self):
-        """[top, side] RGB list, canonical policy order (from cameras.py)."""
+    def observation_images(self, names=None):
+        """RGB list in the requested camera order.
+
+        Defaults to the original policy order [top, side]. Valid names are
+        top, side, and wrist (the gripper camera).
+        """
+        names = C.CAMERA_NAMES if names is None else names
         return [np.asarray(self.cams[n].render()[0])[..., :3].astype(np.uint8)
-                for n in C.CAMERA_NAMES]
+                for n in names]
 
     def observation(self):
         """{"state": (6,), "images": {name: HxWx3 uint8}} for top/side/wrist."""

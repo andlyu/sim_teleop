@@ -5,13 +5,24 @@ place so the viewer / teleop / future recording scripts stay consistent.
 """
 
 import xml.etree.ElementTree as ET
+import os
 from pathlib import Path
 
 import numpy as np
 import genesis as gs
 
 REPO = Path(__file__).resolve().parent.parent
-URDF = REPO / "assets" / "so101" / "so101_new_calib.urdf"
+SO101_CALIBRATION = os.environ.get("SO101_CALIBRATION", "new").strip().lower()
+URDFS = {
+    "new": REPO / "assets" / "so101" / "so101_new_calib.urdf",
+    "old": REPO / "assets" / "so101" / "so101_old_calib.urdf",
+}
+if SO101_CALIBRATION not in URDFS:
+    raise ValueError(
+        f"SO101_CALIBRATION must be one of {sorted(URDFS)}, got {SO101_CALIBRATION!r}"
+    )
+URDF = URDFS[SO101_CALIBRATION]
+ROBOT_EULER = (0.0, 0.0, 90.0) if SO101_CALIBRATION == "old" else (0.0, 0.0, 0.0)
 
 JOINT_NAMES = [
     "shoulder_pan",
@@ -22,8 +33,14 @@ JOINT_NAMES = [
     "gripper",
 ]
 
-KP = np.array([30.0, 30.0, 30.0, 20.0, 15.0, 10.0])
-KV = np.array([2.0, 2.0, 2.0, 1.5, 1.0, 0.8])
+# PD gains. The weight-bearing joints (shoulder_lift, elbow_flex, wrist_flex)
+# need stiff position gains + enough torque, or gravity sags the arm below its
+# commanded target. Raised from the original soft values to hold pose firmly.
+KP = np.array([120.0, 200.0, 160.0, 80.0, 40.0, 30.0])
+KV = np.array([8.0, 12.0, 10.0, 6.0, 3.0, 2.0])
+# Per-joint torque limits (N*m). Generous so the controller can actually resist
+# gravity; the URDF lists effort=35, we allow a bit more headroom for holding.
+FORCE_RANGE = 50.0
 
 # Table: a real desk (top slab + 4 legs) the arm is mounted on top of.
 # Standard office desk, rotated 90deg: 60 cm deep (x) x 120 cm wide (y), 74 cm
@@ -49,6 +66,9 @@ BACKDROP_LEN_FRAC = 1.0            # fraction of the desk depth (x) the side pan
 # Single source of truth for the work surface height. The arm base sits here,
 # the cube rests here, and (eventually) base-relative cameras anchor to it.
 TABLE_TOP_Z = TABLE_HEIGHT
+# In the old-calibration URDF the base plate sits 3.008 cm above the root
+# frame, so lower the root by that amount to put the plate on the desk.
+ROBOT_Z = TABLE_TOP_Z - 0.0300817 if SO101_CALIBRATION == "old" else TABLE_TOP_Z
 # Backwards-compat alias for callers that referenced the old TABLE_SIZE.
 TABLE_SIZE = TABLE_TOP_SIZE
 
@@ -56,7 +76,7 @@ TABLE_SIZE = TABLE_TOP_SIZE
 CUBE_SIZE = 0.03
 CUBE_RHO = 400.0       # light (balsa-ish) so the small servos can hold it
 CUBE_FRICTION = 1.5    # grippy, for graspability
-CUBE_XY = (0.18, 0.0)  # in front of the arm; z is set by the table top
+CUBE_XY = (0.28, 0.10)  # 10 cm farther forward (+x) and left (+y) of the old spot
 
 # Appearance (RGB 0..1). Wooden desk, contrasting red-orange block.
 WOOD_COLOR = (0.55, 0.36, 0.20)       # warm medium-brown wood
@@ -114,12 +134,11 @@ def _add_table(scene):
 
 
 def _add_backdrop(scene):
-    """Add a 3-sided privacy booth (left + right + front) on the desk.
+    """Add side privacy panels on the desk.
 
     Left/right panels run front-to-back along the desk LENGTH (x), spanning half
-    of it on the front (+x) side; the front panel runs across (y) and joins them.
-    The booth is open toward the robot (-x), giving the cameras / vision policy a
-    clean, controlled background.
+    of it on the front (+x) side. The front panel is intentionally omitted so it
+    does not occlude the MolmoAct camera views.
     """
     cx, cy = TABLE_CENTER_XY
     tw, td, _tt = TABLE_TOP_SIZE
@@ -144,17 +163,6 @@ def _add_backdrop(scene):
             ),
             surface=gray,
         )
-
-    # Front panel: at the +x edge, runs across y to close the booth front.
-    front_w = 2.0 * y_edge + thk                     # span between the side panels
-    scene.add_entity(
-        gs.morphs.Box(
-            pos=(x_far - thk / 2.0, cy, z_center),
-            size=(thk, front_w, th),
-            fixed=True,
-        ),
-        surface=gray,
-    )
 
 
 def build_scene(show_viewer: bool = True):
@@ -199,7 +207,8 @@ def build_scene(show_viewer: bool = True):
     robot = scene.add_entity(
         gs.morphs.URDF(
             file=str(URDF),
-            pos=(0.0, 0.0, TABLE_TOP_Z),
+            pos=(0.0, 0.0, ROBOT_Z),
+            euler=ROBOT_EULER,
             fixed=True,
             links_to_keep=["camera_wrist"],
         ),
@@ -223,4 +232,9 @@ def setup_control(robot):
     dofs_idx = [robot.get_joint(n).dofs_idx_local[0] for n in JOINT_NAMES]
     robot.set_dofs_kp(KP, dofs_idx)
     robot.set_dofs_kv(KV, dofs_idx)
+    # Give the motors enough torque headroom to hold the arm against gravity.
+    n = len(dofs_idx)
+    robot.set_dofs_force_range(
+        np.full(n, -FORCE_RANGE), np.full(n, FORCE_RANGE), dofs_idx
+    )
     return dofs_idx
