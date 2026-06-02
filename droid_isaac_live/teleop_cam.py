@@ -27,9 +27,31 @@ ee_idx = bn.index(cand[0] if cand else bn[-1])
 def ee_world():
     return robot.data.body_pos_w[0, ee_idx].detach().cpu().numpy().astype(float)
 
+def ee_quat():
+    return robot.data.body_quat_w[0, ee_idx].detach().cpu().numpy().astype(float)  # (w,x,y,z)
+
+def quat_err(q_des, q_cur):
+    """World-frame rotation vector (axis*angle) that rotates current EE orientation to desired."""
+    w1, x1, y1, z1 = q_des
+    w2, x2, y2, z2 = q_cur[0], -q_cur[1], -q_cur[2], -q_cur[3]   # conjugate of current
+    w = w1*w2 - x1*x2 - y1*y2 - z1*z2
+    x = w1*x2 + x1*w2 + y1*z2 - z1*y2
+    y = w1*y2 - x1*z2 + y1*w2 + z1*x2
+    z = w1*z2 + x1*y2 - y1*x2 + z1*w2
+    if w < 0: w, x, y, z = -w, -x, -y, -z          # shortest path
+    n = (x*x + y*y + z*z) ** 0.5
+    if n < 1e-8: return np.zeros(3)
+    return (2.0 * np.arctan2(n, w) / n) * np.array([x, y, z])
+
+# Lock the EE to the home (downward-facing) orientation during teleop.
+DOWN_QUAT = ee_quat().copy()
+
 MOVE_KEYS = {'left', 'right', 'up', 'down', 'r', 'f'}
 target = ee_world().copy()
-held = set(); grip = {"v": 0.0}; mode = {"v": "teleop"}; frame = {"jpg": b""}; policy = {"c": None}; reset_req = {"v": False}
+held = set(); grip = {"v": 0.0}; mode = {"v": "teleop"}; frame = {"jpg": b"", "id": 0}; policy = {"c": None}; reset_req = {"v": False}
+# per-loop timing (EMA, milliseconds) to find what makes a frame slow
+timing = {"step": 0.0, "read": 0.0, "enc": 0.0, "infer": 0.0, "loop": 0.0, "fps": 0.0, "n": 0}
+def _ema(k, v): timing[k] = v if timing["n"] < 3 else 0.9 * timing[k] + 0.1 * v
 STEP = 0.01   # EE move increment per held step (smaller = finer/slower, easier to control)
 arm_q = {"v": robot.data.joint_pos[0, arm_ids].detach().cpu().numpy().copy()}  # cached arm target
 
@@ -48,8 +70,11 @@ def teleop_targets():
     if 'f' in held:     target[2] -= STEP
     J = robot.root_physx_view.get_jacobians()
     ji = ee_idx - 1 if J.shape[1] == len(bn) - 1 else ee_idx
-    Jp = J[0, ji, :3, :][:, arm_ids].detach().cpu().numpy()
-    dq = Jp.T @ np.linalg.solve(Jp @ Jp.T + 0.0064*np.eye(3), target - ee_world())
+    Jf = J[0, ji, :6, :][:, arm_ids].detach().cpu().numpy()      # full 6xN: linear(3)+angular(3)
+    pos_err = target - ee_world()
+    ori_err = quat_err(DOWN_QUAT, ee_quat())                     # hold downward orientation
+    err = np.concatenate([pos_err, ori_err])
+    dq = Jf.T @ np.linalg.solve(Jf @ Jf.T + 0.01*np.eye(6), err)
     q = robot.data.joint_pos[0, arm_ids].detach().cpu().numpy()
     return q + np.clip(dq, -0.15, 0.15)
 
@@ -72,6 +97,13 @@ addEventListener('keyup',e=>{let k=ks[e.key.toLowerCase()];if(k){snd('/key?k='+k
 
 class H(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"   # keep-alive: native client reuses one connection (low-latency commands)
+    def setup(self):
+        super().setup()
+        try:
+            import socket as _s
+            self.connection.setsockopt(_s.IPPROTO_TCP, _s.TCP_NODELAY, 1)   # no Nagle -> no extra RTT
+        except Exception:
+            pass
     def log_message(self, *a): pass
     def _no_content(self):
         self.send_response(204); self.send_header('Content-Length', '0'); self.end_headers()
@@ -100,6 +132,11 @@ class H(BaseHTTPRequestHandler):
                     if j: self.wfile.write(b'--f\r\nContent-Type: image/jpeg\r\n\r\n'+j+b'\r\n')
                     time.sleep(0.05)
             except Exception: pass
+        elif p.path == '/timing':
+            body = ('{"step_ms":%.1f,"read_ms":%.1f,"enc_ms":%.1f,"infer_ms":%.1f,"loop_ms":%.1f,"fps":%.1f}'
+                    % (timing["step"], timing["read"], timing["enc"], timing["infer"], timing["loop"], timing["fps"])).encode()
+            self.send_response(200); self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body))); self.end_headers(); self.wfile.write(body)
         else:
             self.send_response(404); self.send_header('Content-Length', '0'); self.end_headers()
 
@@ -130,6 +167,7 @@ while app.is_running():
     if mode["v"] == "teleop" and prev_mode != "teleop":
         sync_teleop()
     prev_mode = mode["v"]
+    t0 = time.perf_counter()
     act = None
     if mode["v"] == "policy":
         if policy["c"] is None:
@@ -147,11 +185,24 @@ while app.is_running():
                 print("POLICY_INFER_ERR", e, flush=True); mode["v"] = "teleop"; act = None
     if act is None:
         act = teleop_action()
+    t1 = time.perf_counter()
     obs, _, _, _, _ = env.step(act)
+    t2 = time.perf_counter()
     ext = cam.data.output["rgb"][0].detach().cpu().numpy()[..., :3].astype(np.uint8)
     wr = wcam.data.output["rgb"][0].detach().cpu().numpy()[..., :3].astype(np.uint8)[::-1, ::-1]
+    t3 = time.perf_counter()
     hh = min(360, ext.shape[0], wr.shape[0])   # cap streamed view height; policy still gets full 720p
     def _fit(a): return np.asarray(Image.fromarray(a).resize((int(a.shape[1]*hh/a.shape[0]), hh)))
     combo = np.concatenate([_fit(ext), _fit(wr)], axis=1)
     img = Image.fromarray(combo)
     b = io.BytesIO(); img.save(b, format="JPEG", quality=55); frame["jpg"] = b.getvalue()
+    t4 = time.perf_counter()
+    infer_ms = (t1 - t0) * 1000 if mode["v"] == "policy" else 0.0
+    step_ms = (t2 - t1) * 1000; read_ms = (t3 - t2) * 1000; enc_ms = (t4 - t3) * 1000
+    loop_ms = (t4 - t0) * 1000
+    _ema("infer", infer_ms); _ema("step", step_ms); _ema("read", read_ms); _ema("enc", enc_ms)
+    _ema("loop", loop_ms); _ema("fps", 1000.0 / loop_ms if loop_ms > 0 else 0.0)
+    timing["n"] += 1
+    if loop_ms > 120:   # log slow frames with the breakdown
+        print("SLOW %.0fms (step=%.0f read=%.0f enc=%.0f infer=%.0f) mode=%s"
+              % (loop_ms, step_ms, read_ms, enc_ms, infer_ms, mode["v"]), flush=True)

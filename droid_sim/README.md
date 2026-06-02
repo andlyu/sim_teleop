@@ -110,6 +110,14 @@ ffmpeg -i episode_0.mp4 -vf "select=not(mod(n\,10)),scale=320:-1,tile=4x3" -fram
 ffmpeg -i episode_0.mp4 -vf "fps=12,scale=560:-1" rollout.gif
 ```
 
+## Interactive teleop + eval demo
+`run_eval.py` above runs fixed autonomous rollouts. For the **interactive** version —
+toggle policy ⇄ keyboard teleop, a live mode/timer/scoreboard, and screen recording —
+see **[`../droid_isaac_live/`](../droid_isaac_live/)** (`README.md` there). It replaces
+`run_eval.py` with `teleop_cam.py` (same sim-evals env + openpi server, plus an HTTP
+control/stream server) and a native pygame client on your laptop that connects over a
+Vast-mapped port (no SSH tunnel). Same box setup as above; same `run_serve.sh` policy server.
+
 ## Gotchas
 - **V100 → dead end.** No RT cores; Isaac Sim's renderer won't init. Use RTX.
 - **flatdict build error** (`No module named 'pkg_resources'`) → pin `setuptools<80`.

@@ -1,65 +1,76 @@
-# DROID live demo — policy ⇄ teleop toggle (Isaac Sim)
+# DROID live demo — policy ⇄ teleop, eval scoreboard, recording
 
-Live, interactive DROID (Franka + Robotiq 2F-85) simulation in **Isaac Sim / Isaac Lab**
-(`arhanjain/sim-evals`), driven by the **openpi `pi0_fast_droid_jointpos`** policy, with
-keyboard end-effector teleop for resetting the scene. Press **`T`** to toggle between the
-policy running the task and manual teleop.
+Interactive DROID (Franka + Robotiq 2F-85) simulation in **Isaac Sim** (`arhanjain/sim-evals`),
+driven by the **openpi `pi0_fast_droid_jointpos`** policy, with keyboard end-effector teleop for
+resetting. Toggle between the policy running the task and manual teleop, score each policy run on
+a 10-trial scoreboard, and record the panel to a video.
 
-This is the *Isaac* live demo (the better-looking renderer). The separate Genesis port lives
-in `../droid_genesis/`.
+The separate Genesis port lives in `../droid_genesis/`.
+
+## Architecture (what runs where)
+```
+  Mac (native_viewer.py, pygame)                Vast box (Korea, RTX 4090, CUDA 12.x)
+  ┌───────────────────────────┐   direct TCP   ┌──────────────────────────────────────┐
+  │ window: 2 cams + scoreboard│ ────────────►  │ teleop_cam.py  (HTTP :8080)            │
+  │ keep-alive cmds, TCP_NODELAY│   116.127...:  │  - DROID Isaac env (sim-evals)         │
+  │ /stream frames              │     31755      │  - 6-DOF IK teleop / policy client     │
+  └───────────────────────────┘                │           │ localhost:8000 (websocket) │
+                                                │           ▼                            │
+                                                │ serve_policy.py (openpi pi0-FAST)      │
+                                                └──────────────────────────────────────┘
+```
+- Container port **8080 is mapped to host 31755**, so the Mac connects **directly** to
+  `116.127.115.27:31755` — no SSH tunnel (lower latency + no tunnel drops).
+- Command latency ≈ **155 ms** (the US↔Korea network floor; SSH-tunnel overhead and TCP-Nagle
+  were removed via the direct port + `TCP_NODELAY`). Video ≈ **6 fps** (the RTX render of two
+  640×360 cameras — `step` dominates; see `/timing`). A US box would cut latency to ~20–40 ms.
 
 ## Files
-- **`teleop_cam.py`** — runs on the GPU box (`sim-evals` venv). Builds the DROID env at
-  480×270 cameras, disables the 30 s auto-reset, serves a web UI + MJPEG stream on `:8080`,
-  and runs the main loop: in TELEOP mode it does Jacobian DLS IK from keyboard input; in
-  POLICY mode it calls the openpi client (`sim_evals.inference.droid_jointpos.Client`) with
-  the instruction `"put the cube in the bowl"` and applies the returned joint-position action.
-- **`run_serve.sh`** — runs on the box. Starts the openpi policy server
-  (`pi0_fast_droid_jointpos`) listening on `:8000`, capped at 50% GPU
-  (`XLA_PYTHON_CLIENT_MEM_FRACTION=0.5`) so it coexists with the sim.
-- **`run_teleop.sh`** — runs on the box. Launches `teleop_cam.py` with
-  `OMNI_KIT_ACCEPT_EULA=YES`.
-- **`proxy.py`** — runs on the **Mac**. Pulls the box's MJPEG stream (over an SSH tunnel) and
-  re-serves it as single-JPEG polling on `localhost:8090` (Safari can't render
-  `multipart/x-mixed-replace`). Also forwards `/key`, `/grip`, `/mode` to the box.
+- **`teleop_cam.py`** (runs on the box, in the `sim-evals` venv) — builds the DROID env at
+  640×360, serves HTTP on `:8080` (`/stream`, `/key`, `/grip`, `/mode`, `/reset`, `/state`,
+  `/timing`), HTTP/1.1 keep-alive + `TCP_NODELAY`. Teleop = 6-DOF Jacobian DLS IK (position +
+  orientation locked to the home/downward pose). Policy mode calls
+  `sim_evals.inference.droid_jointpos.Client` → `localhost:8000` with the instruction
+  `"put the rubik's cube in the red bowl"`. `/reset` re-homes the arm to its default joint config.
+- **`run_serve.sh`** (box) — starts the openpi policy server on `:8000`
+  (`pi0_fast_droid_jointpos`, `XLA_PYTHON_CLIENT_MEM_FRACTION=0.5` to share the GPU).
+- **`run_teleop.sh`** (box) — launches `teleop_cam.py` with `OMNI_KIT_ACCEPT_EULA=YES`.
+- **`native_viewer.py`** (Mac, **the primary client**) — pygame window. One persistent `/stream`
+  connection + one keep-alive command connection (`TCP_NODELAY`). Mode buttons (REMOTE TELEOP /
+  PI0.5 POLICY), SUCCESS/FAIL/RESET, a policy timer, a **scoreboard** of trials T1–T10 (time +
+  green ✓ / red ✗), and a **REC** button that records the composited panel to
+  `/tmp/droid_panel_<ts>.mp4` (no OS screen-recording permission needed). Point it at the box by
+  editing `HOST, PORT` at the top.
+- **`proxy.py`** (Mac, browser fallback) — re-serves the MJPEG stream as single-JPEG polling on
+  `localhost:8090` for Safari, with on-screen buttons. Needs an SSH tunnel `localhost:8080 → box`.
+  Superseded by `native_viewer.py`; kept for browser viewing.
 
-## Controls (in the browser)
-- **`T`** — toggle POLICY ⇄ TELEOP (current mode shown as an on-screen overlay).
-- **Arrow keys** — move the end-effector in the table plane.
-- **`R` / `F`** — move the end-effector up / down.
-- **Space** — toggle the gripper open/closed.
-
-The wrist (gripper) camera is flipped 180° in the UI only (right pane); the external camera
-is the left pane.
-
-## How to run
-The box is a Vast.ai GPU instance with **CUDA 12.x driver** (Isaac Sim 5.0's RTX renderer
-crashes on CUDA-13 drivers). `sim-evals` and `openpi` are installed under `/root`.
-
-On the box (two processes — kill any stale `python3` first and confirm the GPU + ports
-`:8000`/`:8080` are free, see `~/.claude/skills/simulation` §11):
+## Launch
+On the box (kill stale `teleop_cam.py` first; leave the policy server up — it's slow to reload):
 ```bash
-setsid bash run_serve.sh  > /root/serve.log  2>&1   # policy server :8000  (~3-4 min: checkpoint dl + JAX load)
-setsid bash run_teleop.sh > /root/teleop.log 2>&1   # sim + web/stream :8080 (~3-4 min: Isaac build)
+setsid bash run_serve.sh  > /root/serve.log  2>&1   # policy server :8000  (~3-4 min: ckpt + JAX)
+setsid bash run_teleop.sh > /root/teleop.log 2>&1   # Isaac sim + :8080    (~3-4 min build)
 ```
-Wait for `server listening on 0.0.0.0:8000` (serve.log) and `TELEOP_READY_8080` (teleop.log).
+Wait for `server listening on 0.0.0.0:8000` and `TELEOP_READY_8080`.
 
-On the Mac:
+On the Mac (no tunnel needed — direct mapped port):
 ```bash
-# tunnel the box's :8080 to localhost
-ssh -f -N -L 8080:127.0.0.1:8080 -p <PORT> root@<HOST>
-python3 proxy.py            # serves http://localhost:8090
+python3 native_viewer.py        # needs: pip install pygame numpy imageio imageio-ffmpeg
 ```
-Open **http://localhost:8090**. Drive with the keys above; press `T` to hand control to the
-policy and `T` again to teleop-reset.
+
+## Controls (native viewer)
+- **Arrows / R / F** — move the EE (in-plane + up/down); gripper stays facing down.
+- **Space** — toggle the gripper.
+- **PI0.5 POLICY / REMOTE TELEOP** buttons (or **T**) — switch who's driving.
+- **SUCCESS / FAIL** (or **S** / **X**) — score the current/last policy run (manual, nothing auto-counts).
+- **RESET** (or **G**) — reset scene, arm to home.
+- **REC** (or **C**) — start/stop recording the panel to mp4.
+- **Esc** — quit.
 
 ## Notes / gotchas
-- Camera resolution is dropped to 480×270 for speed; raise in `teleop_cam.py` (the two
-  `_c.width/_c.height` lines) if you want fidelity over framerate.
-- `cfg.episode_length_s = 100000.0` disables the env's 30 s auto-reset so it doesn't snap back
-  mid-teleop.
-- The policy client is created lazily on the first `T`→POLICY (logs `POLICY_CONNECTED`); an
-  inference/connection failure logs `POLICY_INFER_ERR` / `POLICY_CONNECT_FAILED` and falls
-  back to teleop instead of crashing.
-- See `~/.claude/skills/simulation/SKILL.md` for the full set of sim gotchas (GPU-contention
-  hangs, kill-before-relaunch, the `pkill -f` self-kill trap, CUDA-driver requirement, etc.).
+- Isaac Sim 5.0's RTX renderer crashes on CUDA-13 drivers — the box needs a CUDA-12.x driver.
+- The policy resizes both camera images to **224×224** (`resize_with_pad`), so anything ≥224 is
+  downsampled — render resolution mainly affects *your* view, not the policy input.
+- Assets come from the HF dataset `owhan/DROID-sim-environments` (see `../droid_genesis/ASSETS.md`).
+- See `~/.claude/skills/simulation/SKILL.md` for the broader sim gotchas (GPU-contention hangs,
+  kill-before-relaunch, the `pkill -f` self-kill trap, etc.).
