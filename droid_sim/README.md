@@ -20,6 +20,12 @@ joint-position action space). A `pi05_droid_jointpos` checkpoint is also availab
 
 ## Setup
 
+> **Shortcut:** the steps below are automated in **[`setup_sim.sh`](./setup_sim.sh)**
+> (system libs + uv + clone sim-evals + pyproject patch + `uv sync` + asset download) and
+> **[`setup_openpi.sh`](./setup_openpi.sh)** (clone openpi `karl/droid_policies` + `uv sync`).
+> On a fresh RTX box with a CUDA-12.x driver: `bash setup_sim.sh && bash setup_openpi.sh`.
+> The manual breakdown follows.
+
 ### 1. System libraries (for Isaac Sim headless rendering)
 ```bash
 apt-get update
@@ -109,6 +115,14 @@ ffmpeg -i episode_0.mp4 -vf "select=not(mod(n\,10)),scale=320:-1,tile=4x3" -fram
 # animated gif
 ffmpeg -i episode_0.mp4 -vf "fps=12,scale=560:-1" rollout.gif
 ```
+
+## Interactive teleop + eval demo
+`run_eval.py` above runs fixed autonomous rollouts. For the **interactive** version —
+toggle policy ⇄ keyboard teleop, a live mode/timer/scoreboard, and screen recording —
+see **[`../droid_isaac_live/`](../droid_isaac_live/)** (`README.md` there). It replaces
+`run_eval.py` with `teleop_cam.py` (same sim-evals env + openpi server, plus an HTTP
+control/stream server) and a native pygame client on your laptop that connects over a
+Vast-mapped port (no SSH tunnel). Same box setup as above; same `run_serve.sh` policy server.
 
 ## Gotchas
 - **V100 → dead end.** No RT cores; Isaac Sim's renderer won't init. Use RTX.

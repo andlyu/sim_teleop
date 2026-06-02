@@ -32,3 +32,9 @@ wandb/
 
 # Genesis cache
 .genesis/
+# binary sim assets + debug renders (not stored in git)
+droid_genesis/assets/
+droid_genesis/runs/
+*.usd
+*.hdr
+*.obj
