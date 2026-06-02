@@ -20,6 +20,12 @@ joint-position action space). A `pi05_droid_jointpos` checkpoint is also availab
 
 ## Setup
 
+> **Shortcut:** the steps below are automated in **[`setup_sim.sh`](./setup_sim.sh)**
+> (system libs + uv + clone sim-evals + pyproject patch + `uv sync` + asset download) and
+> **[`setup_openpi.sh`](./setup_openpi.sh)** (clone openpi `karl/droid_policies` + `uv sync`).
+> On a fresh RTX box with a CUDA-12.x driver: `bash setup_sim.sh && bash setup_openpi.sh`.
+> The manual breakdown follows.
+
 ### 1. System libraries (for Isaac Sim headless rendering)
 ```bash
 apt-get update
