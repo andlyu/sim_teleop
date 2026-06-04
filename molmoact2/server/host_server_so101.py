@@ -107,6 +107,7 @@ def build_app(processor, model, dtype, num_steps: int):
                 enable_depth_reasoning=False,
                 num_steps=num_steps,
                 normalize_language=True,
+                enable_cuda_graph=True,  # mirror the model-card snippet exactly
             )
         actions_out = out.actions
         if hasattr(actions_out, "detach"):

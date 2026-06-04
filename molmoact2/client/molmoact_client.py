@@ -56,8 +56,14 @@ class MolmoActClient:
         resp = self._requests.post(f"{self.url}/predict_action", json=payload, timeout=self.timeout_s)
         resp.raise_for_status()
         body = resp.json()
-        actions_raw = decode_array(body["actions"])  # (N, D) model scale
-        chunk = np.stack([action_model_to_sim(a, self.conv) for a in actions_raw])
+        # The server returns the model's FULL action horizon, shape (B, H, D)
+        # (e.g. (1, 30, 6) for this checkpoint) — or (N, D) / (D,) for others.
+        # Flatten all leading/batch dims to a flat list of per-timestep action
+        # vectors so we keep the WHOLE chunk (NOT just step 0 — that bug made the
+        # arm crawl). Each row is mapped model-scale -> follower frame.
+        raw = np.asarray(decode_array(body["actions"]), dtype=np.float32)
+        raw = raw.reshape(-1, raw.shape[-1])  # (H, D)
+        chunk = np.stack([action_model_to_sim(a, self.conv) for a in raw])  # (H, NUM_JOINTS)
         return chunk.astype(np.float32)
 
     def health(self) -> dict:

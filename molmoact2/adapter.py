@@ -124,6 +124,22 @@ def _calibration_name() -> str:
     return name
 
 
+# REAL-HARDWARE convention. The lerobot SO101 *follower* already reports
+# DEGREES (use_degrees=True) in the LeRobot v3.0 frame — no sim radians involved.
+# The MolmoAct2-SO100_101 checkpoint was trained on the older v2.1 frame, so the
+# transform is degree->degree (same shoulder_lift sign flip + 90deg offsets as
+# LEROBOT_V21_COMPAT, but with unit scale instead of deg/rad):
+#     model = signs * deg + offset           (signs = [1,-1,1,1,1,1])
+#     deg   = (model - offset) / signs        (signs are +/-1, so == multiply)
+# Use this (not the rad-based maps) for scripts/run_policy_real.py. The gripper
+# (scale 1, offset 0) is a pass-through hypothesis — VALIDATE in the dry run, as
+# lerobot's gripper unit (degrees vs 0-100) vs the model's is still unconfirmed.
+LEROBOT_V21_COMPAT_DEG = JointConvention(
+    scale=np.array([1.0, -1.0, 1.0, 1.0, 1.0, 1.0], dtype=np.float32),
+    offset=np.array([0.0, 90.0, 90.0, 0.0, 0.0, 0.0], dtype=np.float32),
+)
+
+
 RANGE_ALIGNED = RANGE_ALIGNED_OLD if _calibration_name() == "old" else RANGE_ALIGNED_NEW
 
 # Default convention used by the client. For the standard/current SO101

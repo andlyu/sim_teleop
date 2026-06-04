@@ -3,6 +3,22 @@
 Quick commands for running the Genesis SO101 sim on the Mac with the MolmoAct2
 policy hosted on a Vast GPU box.
 
+## Best box (standing default): RTX 4090 24 GB
+
+The workload is **batch-1, real-time closed-loop inference** of a 5B VLA, so the
+bottleneck is single-stream latency, not VRAM (bf16 needs ~16 GB). Pick high
+clocks + native bf16, not a big datacenter card:
+
+- **RTX 4090 (24 GB)** — best latency-per-dollar; native bf16; default choice.
+- **RTX 3090 (24 GB)** — works, native bf16, cheaper, ~30–50% slower per action.
+- **V100 32 GB** — avoid: no good bf16, forces `--dtype float32` (slower + more mem).
+- **A100 / H100** — overkill; the SSH-tunnel network RTT + per-step image upload
+  rivals/exceeds GPU time, so a faster card buys little at 3–6× the cost.
+
+Because the model runs **remotely with a tunnel to the Mac**, network latency
+matters as much as the GPU: **choose an instance geographically close to you**,
+with good bandwidth and a solid reliability score, ≥60 GB disk, PyTorch+CUDA 12.1.
+
 Replace these placeholders with the current Vast SSH target:
 
 ```bash
